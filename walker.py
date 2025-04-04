@@ -1,16 +1,29 @@
-import osmnx as ox
-import os
-from networkx import MultiDiGraph
-import networkx as nx
-import random
-import folium
 import json
 import multiprocessing
+import os
+import random
+
+import folium
+import networkx as nx
+import osmnx as ox
 from geopy.geocoders import Nominatim
+from networkx import MultiDiGraph
 
 GRAPH_FILE = "moscow_sao_graph.graphml"
 NODES_FILE = "valid_end_nodes.json"
-sao_boundary = "Северный административный округ, Москва, Россия"
+COLORS = [
+    "blue",
+    "red",
+    "green",
+    "purple",
+    "orange",
+    "darkred",
+    "cadetblue",
+    "darkgreen",
+    "black",
+    "pink",
+]
+BOUNDARY = "Северный административный округ, Москва, Россия"
 start_address = "Москва, Флотская 34к1"
 
 
@@ -23,6 +36,11 @@ def load_graph(graph_file: str, boundary: str) -> MultiDiGraph:
     graph = ox.graph_from_place(boundary, network_type="walk")
     ox.save_graphml(graph, graph_file)
     return graph
+
+
+def load_nodes(path: str) -> list:
+    with open(path) as file:
+        return json.load(file)
 
 
 def get_location(address: str) -> tuple:
@@ -58,46 +76,73 @@ def find_near_nodes():
     print(f"Найдено и сохранено {len(valid_end_nodes)} подходящих нод.")
 
 
-def create_route(points: int):
-    graph = load_graph(GRAPH_FILE, sao_boundary)
-    start_lon, start_lat = get_location(start_address)
-    if not start_lon:
+def generate_route(start_node, nodes) -> list:
+    pass
+
+
+def create_route(points: int, num_routes: int, boundary: str):
+    graph = load_graph(GRAPH_FILE, boundary)
+    start_lat, start_lon = get_location(start_address)
+    if not start_lat:
         print("Ошибка: не удалось определить координаты адреса.")
         return
 
+    if os.path.exists(NODES_FILE):
+        nodes = load_nodes(NODES_FILE)
+    else:
+        nodes = list(graph.nodes)
+
+    m = folium.Map(location=[start_lat, start_lon], zoom_start=15)
+
     start_node = ox.nearest_nodes(graph, start_lon, start_lat)
-    route = [start_node]
+    for r in range(num_routes):
+        print(f"🔄 Оптимизируем маршрут {r + 1}/{num_routes}")
+        route = [start_node]
 
-    nodes = list(graph.nodes)
-    waypoints = random.sample(nodes, points)
-    for waypoint in waypoints:
-        segment = nx.shortest_path(graph, route[-1], waypoint, weight="length")
-        route.extend(segment[1:])
+        waypoints = random.sample(nodes, points)
+        for waypoint in waypoints:
+            segment = nx.shortest_path(graph, route[-1], waypoint, weight="length")
+            route.extend(segment[1:])
 
-    route_back = nx.shortest_path(graph, route[-1], start_node, weight="length")
-    route.extend(route_back[1:])
+        route_back = nx.shortest_path(graph, route[-1], start_node, weight="length")
+        route.extend(route_back[1:])
 
-    route_coords = [(graph.nodes[node]['y'], graph.nodes[node]['x']) for node in route]
-    m = folium.Map(location=route_coords[0], zoom_start=15)
+        route_coords = [
+            (graph.nodes[node]["y"], graph.nodes[node]["x"]) for node in route
+        ]
+        length = sum(
+            graph.edges[u, v, 0]["length"]
+            for u, v in zip(route[:-1], route[1:])
+            if graph.has_edge(u, v)
+        )
 
-    folium.PolyLine(route_coords, color="blue", weight=5, opacity=0.7).add_to(m)
+        route_color = COLORS[r % len(COLORS)]
+        folium.PolyLine(
+            route_coords,
+            color=route_color,
+            weight=5,
+            opacity=0.7,
+            tooltip=f"Маршрут {r} ({round(length)} м)",
+        ).add_to(m)
 
-    start_coords = (graph.nodes[start_node]['y'], graph.nodes[start_node]['x'])
-    folium.Marker(start_coords, icon=folium.Icon(color="green")).add_to(m)
+        start_coords = (graph.nodes[start_node]["y"], graph.nodes[start_node]["x"])
+        folium.Marker(start_coords, icon=folium.Icon(color="green")).add_to(m)
 
-    end_node = waypoints[-1]
-    end_coord = (graph.nodes[end_node]['y'], graph.nodes[end_node]['x'])
-    folium.Marker(end_coord, icon=folium.Icon(color="red")).add_to(m)
+        end_node = waypoints[-1]
+        end_coord = (graph.nodes[end_node]["y"], graph.nodes[end_node]["x"])
+        folium.Marker(end_coord, icon=folium.Icon(color="red")).add_to(m)
 
-    coords = [(graph.nodes[node]['y'], graph.nodes[node]['x']) for node in waypoints[:-1]]
-    icon_color = "orange"
-    for i, coord in enumerate(coords):
-        folium.Marker(coord, icon=folium.Icon(color=icon_color)).add_to(m)
+        coords = [
+            (graph.nodes[node]["y"], graph.nodes[node]["x"]) for node in waypoints[:-1]
+        ]
+        icon_color = "orange"
+        for i, coord in enumerate(coords):
+            folium.Marker(coord, icon=folium.Icon(color=icon_color)).add_to(m)
 
-    m.save("random_walk_route.html")
-    print("✅ Маршрут сохранён в 'random_walk_route.html'")
+    file_name = f"all_routes.html"
+    m.save(file_name)
+    print(f"✅ Карта сохранена: {file_name}")
 
 
 if __name__ == "__main__":
-    create_route(4)
-    # find_near_nodes()
+    create_route(4, 2, BOUNDARY)

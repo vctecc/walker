@@ -1,3 +1,6 @@
+*.html
+*.graphml
+
 .idea/
 venv/
 cache/
